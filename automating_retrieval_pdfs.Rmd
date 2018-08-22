@@ -1,0 +1,246 @@
+---
+title: "Automating PDF Retrieval from Websites"
+author: "Brandon Sepulvado"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Problem
+
+I study the emergence of new fields and categorization practices within the biomedical sciences, and bioethics is a key domain where academics and practitioners debate issues affecting patients, policies, and the organziation of societal risks. France has an interesting organization, called the __Comité Consultatif National d'Éthique__ (henceforth, CCNE), that provides ethical guidance for various policies. The [CCNE](http://www.ccne-ethique.fr/en) may help the President of France, the presidents of the National Assembly and Senate, higher education insitutions, various public organziations, and certain foundations. The CCNE was established in 1983 by the government and regularly releases opinions. 
+
+I want to download all of the opinions released to date (127 in English, 128 in French). Given the relatively small number, this task could be accomplished manually, but I want to replicate it for several international organization. Thus, I will use R to automate it. 
+
+# Getting the PDFs
+
+I will obtain the opinion PDFs in two basic steps: get the file links and download the files. 
+
+There are multiple ways to accomplish these tasks, but I will demonstrate two. 
+
+## Obtain File Links with rvest
+
+The [rvest](https://github.com/hadley/rvest) package is probably the best documented of the potential methods and was created by Hadley Wickham. It basically serves to facilitate work with the `xml2` and `httr` packages, which can be rather complex and difficult to use. There are multiple good tutorials for rvest, such as [this](https://www.datacamp.com/community/tutorials/r-web-scraping-rvest) one from DataCamp and [thus](https://blog.rstudio.com/2014/11/24/rvest-easy-web-scraping-with-r/) from RStudio. 
+
+### CSS SelectorGadget
+
+Before we can extract the links to the opinion files, we need to know where exactly in the underlying code for the webpage is housed the file paths. I will use the CSS selector. Luckily, one does not have to be a CSS/HTML expert (I certainly am not); [selectorgadget](https://selectorgadget.com/) provides a wonderful bookmarklet and Chrome extension (I use the latter).
+
+Insert gif of selection process here. 
+
+The main/first page for the CCNE opinions is this: http://www.ccne-ethique.fr/en/type_publication/avis. When you navigate to this link, you will see a list of the several latest opinions, and several "unofficial" opinions, which are not part of their formal opinion series. The latter will not have a number (in the No. field). You cannot download an opinion on this page; rather, you must click on the title (titre) of an opinion. If you click on the latest opinion, number 127, you will be directed to a page with a summary of the opinion and a button to download the PDF. The summaries are not consistently this long or detailed, so I want to actual files. 
+
+The process to identify the CSS selector is quite simple. Click on the Chrome extension and then on the "Download Document" button. You will see that there are many other parts of the page that are highlighted in yellow, which is a problem. As such, I click on the CCNE link at the top left of the page to tell the selectorgadget that I do not want it; now, the only item highlighted is the button. The selectorgadget indicates that the CSS selector is _"#main-content a"_. Note: I repeated this process on multiple other opinion pages, and every repetition gave the same CSS selector.
+
+### Using CSS Selector with rvest
+
+Now that we know which part of the webpage we want, let's use rvest to get it. In the following code chunk, I load the package and set the webpage to scrape. 
+
+```{r load_setpage}
+# load package
+library(rvest)
+
+# set page
+webpage <- read_html("http://www.ccne-ethique.fr/en/publications/ccnes-opinion-ndeg-127-migrants-health-and-ethical-imperatives")
+```
+
+Now, let's extract the information we want.
+
+```{r}
+pdf_link_incorrect <- webpage %>% 
+  html_node("#main-content a") %>% 
+  html_text()
+pdf_link_incorrect
+```
+
+Oh no, something is wrong! The output says "Home". This obviously is not what we want, and the reason has to do with the (incorrect) CSS selector. Instead of using the selectorgadget, I will now look at the webpage code to see if I can get a better idea of the correct selector. 
+
+Right click on the "download document" button, and choose inspect. You should then see a pane with the relevant code selected; see the image below. 
+
+![Figure 1: Code inspection](inspect_element.png)
+
+
+You can see that the selected section falls within a div section with a panel-content class and that the section immediately containing the pdf link has an a tag. The actual link is an href attribute. I, in this next chunk of code, use the new information to extract the link. 
+
+```{r extract_link}
+pdf_link <- webpage %>% 
+  html_node("div.pane-content a") %>% 
+  html_attr("href") 
+```
+
+Voilà! We now have the link, but how to get the pdf text into R? There are two options. I will show both, but I will only use the second.
+
+First, you might want to download the file onto your hard drive (or server). I will not execute the following code.
+
+```{r download_pdf, eval = FALSE}
+download.file(pdf_link,
+              "./opinion.pdf")
+```
+The first piece of required input is the pdf link (`pdf_link`), and the second is the file destination on your local drive or server. 
+
+However, I do not want to download the actual files; I just want the text. There are multiple packages that will read text from pdf files, but I will use the pdftools package. By using the `pdf_text` function, we can go directly from the `pdf_link` object to a new object containing the opinion text, bypassing the need to save the pdf file.
+
+```{r read_opinion_text}
+library(pdftools)
+opinion <- pdf_text(pdf_link)
+```
+
+This works! I will postpone a detailed examination of the `opinion` object for later. However, there is a key limitation to this approach: we need the links to 127 (English) documents, and it would be quite inefficient to repeat the rvest procedure for each page containing the opinions. In many cases, you might be able to create quickly a vector of webpages from which you could extract the pdf link, but, for the site at hand, there are considerable changes between the page links as one scrolls through them, which makes simply pasting slight alterations of similarly structured links problematic (though it would still be possible). Now, I am will discuss another manner of doing what we just did. I will also delay a treatment of the `opinion` object's structure.  
+
+## Obtaining File Links with Rcrawler
+
+The Rcrawler package, unlike rvest, will both crawl and scrape a website, which makes it more desireable for the current task (i.e., pulling links using a given CSS selector from multiple pages). Its Github [site](https://github.com/salimk/Rcrawler) contains detailed information and examples. 
+
+
+
+```{r test_crawl}
+library(Rcrawler)
+Rcrawler(Website = "http://www.ccne-ethique.fr/en/publications", 
+         no_cores = 4, 
+         no_conn = 4, 
+         urlregexfilter = "^.+\\.(([pP][dD][fF]))$",
+         #ExtractCSSPat = c("div.pane-content a[href]"),
+         #ExtractXpathPat = c("//*[@id='main-content']/div[3]/div/div/div[6]/div/a"),
+         #PatternsNames = c("pdf_link"), 
+         # ignore extensions, minus .pdf; from package github page
+         urlExtfilter = c("flv","mov","swf","txt","xml","js","css","zip","gz","rar","7z","tgz","tar","z","gzip","bzip","tar","mp3","mp4","aac","wav","au","wmv","avi","mpg","mpeg","doc","docx","xls","xlsx","ppt","pptx","jpg","jpeg","png","gif","psd","ico","bmp","odt","ods","odp","odb","odg","odf"),
+         ManyPerPattern = TRUE, 
+         MaxDepth=4)
+
+test_links <- LinkExtractor(url = "http://www.ccne-ethique.fr/en/publications/", urlExtfilter = c("flv","mov","swf","txt","xml","js","css","zip","gz","rar","7z","tgz","tar","z","gzip","bzip","tar","mp3","mp4","aac","wav","au","wmv","avi","mpg","mpeg","doc","docx","xls","xlsx","ppt","pptx","jpg","jpeg","png","gif","psd","ico","bmp","odt","ods","odp","odb","odg","odf")) 
+
+webpage %>% 
+  html_node("#main-content time") %>% 
+  html_attr("datetime")
+
+webpage %>% 
+  html_node("div.field.field-type-number-integer") %>% 
+  html_attr("class")
+
+webpage %>% 
+  html_nodes(xpath = "//*[@id='main-content']/div[3]/div/div/div[6]/div/a") %>% 
+  html_attr("href")
+
+
+
+  
+  http://www.ccne-ethique.fr/sites/default/files/publications/
+
+```
+
+```{r automate_link_retrieval}
+# set page
+webpage_pubs <- read_html("http://www.ccne-ethique.fr/en/publications")
+
+# get all opinion titles on page
+webpage_pubs %>% 
+  html_nodes(".cols-4 a") %>% 
+  html_text()
+
+# get links for each page associated with these titles
+page_links <- webpage_pubs %>% 
+  html_nodes("td.views-field.views-field-title a") %>% 
+  html_attr("href")
+
+# complete links (with initial site info)
+library(glue)
+page_links <- glue("http://www.ccne-ethique.fr/{page_links}")
+
+# function to get pdf links from each page (row) above
+get_pdf_link <- function(parent_link){
+  pdf_link <- read_html(parent_link) %>% 
+    html_node("div.pane-content a") %>% 
+    html_attr("href") 
+  
+  if(!stringr::str_detect(pdf_link, "\\.pdf")) {
+    pdf_link <- NA
+  }
+  
+  return(pdf_link)
+}
+
+# apply to all links page_links
+pdf_links_10 <- lapply(page_links, get_pdf_link)
+
+# turn into tibble
+library(dplyr)
+pdf_links_10 <- pdf_links_10 %>% 
+  unlist() %>% 
+  as_tibble() %>% 
+  rename(pdf_link = value)
+  
+  # had to use this approach because bind_rows() matches
+  # on column names, which somehow got set as the entire
+  # url for each list element (also the content) of
+  # pdf_links_10
+
+
+# get total number of pages
+webpage_pubs %>% 
+  html_nodes("ul.pager li.last a") %>% 
+  html_attr("href")
+
+# make a function
+number_pages <- function(url){
+  read_html(url) %>% # url can't be already created by read_html()
+  html_nodes("ul.pager li.last a") %>% 
+  html_attr("href")
+}
+
+### get list of all publication (main) pages
+
+# first page has unique url
+first_page <- "http://www.ccne-ethique.fr/en/publications"
+
+# create numeric vector to input into url vector
+numbers <- seq(from = 1, to = 13, by = 1)
+
+# rest (2-13): common format
+other_pages <- glue("http://www.ccne-ethique.fr/en/publications?page={numbers}")
+
+# combine first_page and other_pages and make tibble
+all_main_pages <- c(first_page, other_pages) #%>% 
+  #as_tibble() %>% 
+  #rename(main_pagelink = value)
+
+```
+
+Now, run the original function on `all_pages`. 
+
+```{r}
+# create function to get each publication's link from each "main page"
+get_pub_pages <- function(main_page){
+  read_html(main_page) %>% 
+  html_nodes("td.views-field.views-field-title a") %>% 
+  html_attr("href")
+}
+
+# apply function to all main pages
+all_pub_pages <- lapply(all_main_pages, get_pub_pages)
+
+# check out object
+class(all_pub_pages)
+length(all_pub_pages)
+
+# complete url NOT USING GLUE DUE TO POTENTIAL VECTORIZATION ISSUE???
+#all_pub_pages <- lapply(all_pub_pages, function(x){
+#  as_tibble(x) %>% 
+#    rename(partial_pub_page_link = value) %>% 
+#    mutate(full_pub_page_link = #glue("http://www.ccne-ethique.fr{partial_pub_page_link}"))})
+
+# complete url
+all_pub_pages <- lapply(all_pub_pages, function(x){
+  as_tibble(x) %>% 
+    rename(partial_pub_page_link = value) %>% 
+    mutate(full_pub_page_link =
+             paste0("http://www.ccne-ethique.fr", partial_pub_page_link))})
+
+# collpase into tibble
+all_pub_pages <- bind_rows(all_pub_pages)
+
+```
+
+change
