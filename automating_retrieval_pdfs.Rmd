@@ -9,6 +9,14 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r load_packages, message=FALSE, warning=FALSE}
+library(rvest)
+library(dplyr)
+library(glue)
+library(pdftools)
+```
+
+
 # Problem
 
 I study the emergence of new fields and categorization practices within the biomedical sciences, and bioethics is a key domain where academics and practitioners debate issues affecting patients, policies, and the organziation of societal risks. France has an interesting organization, called the __Comité Consultatif National d'Éthique__ (henceforth, CCNE), that provides ethical guidance for various policies. The [CCNE](http://www.ccne-ethique.fr/en) may help the President of France, the presidents of the National Assembly and Senate, higher education insitutions, various public organziations, and certain foundations. The CCNE was established in 1983 by the government and regularly releases opinions. 
@@ -88,70 +96,69 @@ library(pdftools)
 opinion <- pdf_text(pdf_link)
 ```
 
-This works! I will postpone a detailed examination of the `opinion` object for later. However, there is a key limitation to this approach: we need the links to 127 (English) documents, and it would be quite inefficient to repeat the rvest procedure for each page containing the opinions. In many cases, you might be able to create quickly a vector of webpages from which you could extract the pdf link, but, for the site at hand, there are considerable changes between the page links as one scrolls through them, which makes simply pasting slight alterations of similarly structured links problematic (though it would still be possible). Now, I am will discuss another manner of doing what we just did. I will also delay a treatment of the `opinion` object's structure.  
+This works! I will postpone a detailed examination of the `opinion` object for later. However, there is a key limitation to this approach: we need the links to 127 (English) documents, so let's focus on getting the rest of them. The ideal way to do so would be to set up a crawler to go through the site for us, but that's a bit advanced for this workshop. For now, we will strategically going through the relevant sections of the site and select only what we want.   
 
-## Obtaining File Links with Rcrawler
+## Getting ALL the Opinions
 
-The Rcrawler package, unlike rvest, will both crawl and scrape a website, which makes it more desireable for the current task (i.e., pulling links using a given CSS selector from multiple pages). Its Github [site](https://github.com/salimk/Rcrawler) contains detailed information and examples. 
+To recap, the previous approach will largely work for downloading all opinions; we just need to expand it a bit. From each *opinion's* page, we selected the *pdf* link that we then read the PDF's text into an R object. The problem now is twofold: (1) collect all the page urls for each opinion and (2) connect these to the previous workflow. 
 
+The major problem with this website is that it does not list all the opinions on a single page and that the structure of the first and all other publication pages' url differs. The general set of tasks is as follows:
 
+    1. Gather all the CCNE opinion links for a single page of publications section
+    2. Repeat for every page of publications section
+    3. Combine information into a single object
 
-```{r test_crawl}
-library(Rcrawler)
-Rcrawler(Website = "http://www.ccne-ethique.fr/en/publications", 
-         no_cores = 4, 
-         no_conn = 4, 
-         urlregexfilter = "^.+\\.(([pP][dD][fF]))$",
-         #ExtractCSSPat = c("div.pane-content a[href]"),
-         #ExtractXpathPat = c("//*[@id='main-content']/div[3]/div/div/div[6]/div/a"),
-         #PatternsNames = c("pdf_link"), 
-         # ignore extensions, minus .pdf; from package github page
-         urlExtfilter = c("flv","mov","swf","txt","xml","js","css","zip","gz","rar","7z","tgz","tar","z","gzip","bzip","tar","mp3","mp4","aac","wav","au","wmv","avi","mpg","mpeg","doc","docx","xls","xlsx","ppt","pptx","jpg","jpeg","png","gif","psd","ico","bmp","odt","ods","odp","odb","odg","odf"),
-         ManyPerPattern = TRUE, 
-         MaxDepth=4)
+### Main (Publication) Pages
 
-test_links <- LinkExtractor(url = "http://www.ccne-ethique.fr/en/publications/", urlExtfilter = c("flv","mov","swf","txt","xml","js","css","zip","gz","rar","7z","tgz","tar","z","gzip","bzip","tar","mp3","mp4","aac","wav","au","wmv","avi","mpg","mpeg","doc","docx","xls","xlsx","ppt","pptx","jpg","jpeg","png","gif","psd","ico","bmp","odt","ods","odp","odb","odg","odf")) 
+In this section, I want to explore each main page of the publications section and to get the link to the page with information about each opinion and its pdf link. 
 
-webpage %>% 
-  html_node("#main-content time") %>% 
-  html_attr("datetime")
-
-webpage %>% 
-  html_node("div.field.field-type-number-integer") %>% 
-  html_attr("class")
-
-webpage %>% 
-  html_nodes(xpath = "//*[@id='main-content']/div[3]/div/div/div[6]/div/a") %>% 
-  html_attr("href")
-
-
-
-  
-  http://www.ccne-ethique.fr/sites/default/files/publications/
-
-```
-
-```{r automate_link_retrieval}
+```{r links_from_single_mainpage}
 # set page
 webpage_pubs <- read_html("http://www.ccne-ethique.fr/en/publications")
 
-# get all opinion titles on page
-webpage_pubs %>% 
-  html_nodes(".cols-4 a") %>% 
-  html_text()
-
-# get links for each page associated with these titles
-page_links <- webpage_pubs %>% 
+# get links for each publication page associated with these titles
+pub_page_links <- webpage_pubs %>% 
   html_nodes("td.views-field.views-field-title a") %>% 
   html_attr("href")
 
+# print result
+pub_page_links
+```
+
+As you can see, `pub_page_links` contains a link from the landing publications page (`webpage_pubs`), but it is relative: we cannot enter it into a browser and be taken to the publication's page. Rather, we need to "complete" the url with that of the main site. The following code chunk uses the glue package to accomplish this task. 
+
+```{r complete_pub_page_links}
 # complete links (with initial site info)
-library(glue)
-page_links <- glue("http://www.ccne-ethique.fr/{page_links}")
+pub_page_links <- glue("http://www.ccne-ethique.fr/{pub_page_links}")
+```
+
+We now have a character vector of ten complete urls to each of the CCNE opinions that are listed on the main publications landing page. I write, in the next bit of code, a function that takes these links and returns the links to each page's opinion pdf. 
+```{r get_pdf_function_1}
+# function to get pdf links from each page (row) above
+get_pdf_link <- function(pub_page_link){
+  pdf_link <- read_html(pub_page_link) %>% 
+    html_node("div.pane-content a") %>% 
+    html_attr("href")
+}
+
+# apply to all links pub_page_links
+pdf_links_10 <- lapply(pub_page_links, get_pdf_link) %>% 
+  unlist() %>% 
+  as_tibble() %>% 
+  rename(pdf_link = value)
+
+# print result
+pdf_links_10
+```
+There are a few things to note here. The function take *a single publication page* and returns its pdf link, and, after writing that, I use `lapply()` to apply this function to each url within `pub_page_link`, after which I collapse the resultant list into a tibble. In many cases, you can use `bind_rows()` from the dplyr package after `lapply()`, but, because `bind_rows()` relies on column names, it does not work in this instance; this issue is why pipe into the `unlist()`-`as_tibble()`-`rename()` chain. 
+
+However, there is a big issue: the fourth row does not contain a pdf link. The entry is for a footnote on that page, which can be resolved with effort (that is not easily generalizable to other problems), but I will, for the time being, simply rewrite the function to replace this value with an NA. I use the rule that each url should contain "pdf". 
+
+```{r get_pdf_function_2}
 
 # function to get pdf links from each page (row) above
-get_pdf_link <- function(parent_link){
-  pdf_link <- read_html(parent_link) %>% 
+get_pdf_link <- function(pub_page_link){
+  pdf_link <- read_html(pub_page_link) %>% 
     html_node("div.pane-content a") %>% 
     html_attr("href") 
   
@@ -162,33 +169,33 @@ get_pdf_link <- function(parent_link){
   return(pdf_link)
 }
 
-# apply to all links page_links
-pdf_links_10 <- lapply(page_links, get_pdf_link)
-
-# turn into tibble
-library(dplyr)
-pdf_links_10 <- pdf_links_10 %>% 
+# apply to all links pub_page_links
+pdf_links_10 <- lapply(pub_page_links, get_pdf_link) %>% 
   unlist() %>% 
   as_tibble() %>% 
   rename(pdf_link = value)
-  
-  # had to use this approach because bind_rows() matches
-  # on column names, which somehow got set as the entire
-  # url for each list element (also the content) of
-  # pdf_links_10
 
+# print result
+pdf_links_10
+```
 
+### All Publication Pages
+
+In the last section, we took a single "main" page of the CCNE website's publication section, where 10 opinions are listed and where we can find the url for each of those opinions' webpage. We obtained a part of each of the 10 urls and then completed. Next, we wrote a function to extract the pdf link contained within each of the publication webpages. The task now is to repeat this process for each "main" publication page. 
+
+![Figure 2: Getting last page](page_numbers.png)
+
+Using the CSS selector identified in Figure 2, I now extact the html attribute for the last page, just to make inspection easier. 
+```{r}
 # get total number of pages
 webpage_pubs %>% 
   html_nodes("ul.pager li.last a") %>% 
   html_attr("href")
+```
+This part of the url indicates 13 as the page number, but, if you compare carefully this url with the initial page ("http://www.ccne-ethique.fr/en/publications"), you should notice that they have distinct structures. The page number for page two begins with one, and the structure for the remaining pages remains the same. We thus have a total of 14 "main" publication pages.
 
-# make a function
-number_pages <- function(url){
-  read_html(url) %>% # url can't be already created by read_html()
-  html_nodes("ul.pager li.last a") %>% 
-  html_attr("href")
-}
+The next code chunk creates `all_main_pages`, which creates character vector of all main page urls. 
+```{r}
 
 ### get list of all publication (main) pages
 
@@ -206,10 +213,15 @@ all_main_pages <- c(first_page, other_pages) #%>%
   #as_tibble() %>% 
   #rename(main_pagelink = value)
 
+# print result
+all_main_pages
+
 ```
 
-Now, run the original function on `all_pages`. 
 
+In a previous section, I extracted all the publication pages for opinions listed on the main "main" page. Now, I want to use the list of all "main" pages as input and receive as output all of the publication pages. 
+
+This section includes the `get_pub_pages` function, which is very simple and requires the url to one of the main pages. The following line of code applies this function to `all_main_pages`. 
 ```{r}
 # create function to get each publication's link from each "main page"
 get_pub_pages <- function(main_page){
@@ -224,6 +236,16 @@ all_pub_pages <- lapply(all_main_pages, get_pub_pages)
 # check out object
 class(all_pub_pages)
 length(all_pub_pages)
+```
+Applying the function to all main pages returns a list of 14 elements because there are 14 main pages. 
+
+
+```{r}
+all_pub_pages[[1]]
+```
+
+However, examining the first element of `all_pub_pages` shows that they are again not urls that will permit R to navigate to the pages. Thus, I need to complete them.
+```{r}
 
 # complete url NOT USING GLUE DUE TO POTENTIAL VECTORIZATION ISSUE???
 #all_pub_pages <- lapply(all_pub_pages, function(x){
@@ -241,5 +263,40 @@ all_pub_pages <- lapply(all_pub_pages, function(x){
 # collpase into tibble
 all_pub_pages <- bind_rows(all_pub_pages)
 
+# check out result
+class(all_pub_pages)
+dim(all_pub_pages)
+names(all_pub_pages)
+head(all_pub_pages, 10)
+```
+Using `lapply()`, I create a new variable, named `full_pub_page_link`, within each list element containing the full url, and I then use bind rows to collapse the list into a tibble. I am able to do so now because I named both columns (i.e., `partial_pub_page_link` and `full_pub_page_link`). I commented out a section of code that warrants mention. You may use the `glue()` command to accomlish the same work as `paste0()`, but vectorization creates a poential issue. Even though the results seemed fine with `glue()`, I sided with `paste0()` to be safe.
+
+## Returning to Text Import
+
+Now that we have completed the three tasks (i.e., gather all the CCNE opinion links for a single page of publications section, repeat for every page of publications section, and combine information into a single object), we need to get the text from the CCNE opinion pdfs. I earlier illustrated two ways of doing this: you can, using the pdftools package, download the files or read the text of each directly into R. I will opt for the latter.
+
+But, before doing that, let's use the `get_pdf_link()` function from earlier to get every pdf link based upon `all_pub_pages$full_pub_page_link`.
+
+PROBLEMS FROM HERE DOWN!
+```{r get_all_pdf_links}
+all_pdf_links <- lapply(all_pub_pages$full_pub_page_link, get_pdf_link) #%>% 
+  #as_tibble() %>% 
+  #rename(pdf_link = value) %>% 
+  #bind_rows()
+```
+
+```{r}
+list <- vector(mode = "list", length = nrow(all_pub_pages))
+for i in 1:nrow(all_pub_pages){
+  list[[i]] <- get_pdf_link(all_pub_pages[i,2])
+}
+```
+
+
+
+
+```{r}
+opinion_texts <- lapply(all_pub_pages$full_pub_page_link, pdf_text) 
+  
 ```
 
