@@ -14,6 +14,7 @@ library(rvest)
 library(dplyr)
 library(glue)
 library(pdftools)
+library(tesseract)
 ```
 
 
@@ -276,8 +277,6 @@ Using `lapply()`, I create a new variable, named `full_pub_page_link`, within ea
 Now that we have completed the three tasks (i.e., gather all the CCNE opinion links for a single page of publications section, repeat for every page of publications section, and combine information into a single object), we need to get the text from the CCNE opinion pdfs. I earlier illustrated two ways of doing this: you can, using the pdftools package, download the files or read the text of each directly into R. I will opt for the latter.
 
 But, before doing that, let's use the `get_pdf_link()` function from earlier to get every pdf link based upon `all_pub_pages$full_pub_page_link`.
-
-PROBLEMS FROM HERE DOWN!
 ```{r get_all_pdf_links}
 # get pdf links
 all_pdf_links <- lapply(all_pub_pages$full_pub_page_link, get_pdf_link) 
@@ -289,6 +288,8 @@ all_pdf_links <- all_pdf_links %>%
   rename(pdf_link = value)
 ```
 
+
+This code saves the pdf links, so I do not have to access the site from now on every time I would like to reference the links. 
 ```{r}
 # save so don't have to access site every time
 saveRDS(all_pdf_links, file = "all_pdf_links.rds")
@@ -304,7 +305,7 @@ for (i in 1:20){
 ```
 
 
-errors
+We have now arrived at the big moment: extracting the text from all pdfs. Before going so, it is necessary to remove the two NAs because `pdf_text()` will attempt to treat them as urls.
 
 ```{r}
 all_pdf_links_nomiss <- all_pdf_links %>% 
@@ -313,6 +314,9 @@ all_pdf_links_nomiss <- all_pdf_links %>%
 opinion_texts <- lapply(all_pdf_links_nomiss$pdf_link, pdf_text) 
   
 ```
+Oh now! We get a ton of errors that do not provide much direction about where exactly the problem is located. 
+
+To help solve this problem, I'm going to go with a computationally less efficient though perhaps more straightforward manner of identifying problematic areas/files. First, I create a variable that is simply the case/row id; second, I write a for loop to report that a row is successfully handled, which will at a minimum let us know where the problem originates.
 ```{r}
 all_pdf_links_nomiss <- all_pdf_links_nomiss %>% 
   mutate(row_id = 1:nrow(all_pdf_links_nomiss))
@@ -320,7 +324,57 @@ all_pdf_links_nomiss <- all_pdf_links_nomiss %>%
 test_text <- vector(mode = "list", length = nrow(all_pdf_links_nomiss))
 for (i in 1:nrow(all_pdf_links_nomiss)){
   test_text[[1]] <- pdf_text(all_pdf_links_nomiss$pdf_link[i])
-  message(paste0("Row ", all_pdf_links_nomiss$row_id[i], " is fine."))
+  message(paste0("Row ", all_pdf_links_nomiss$row_id[i]))
 }
+```
+You can see where the errors from earlier begin, but this does not mean that everything else went fine. The following code identifies how many list elements are not empty. If the rows that did not exhibit the above errors are fine, then they should have text, meaning each element should have a length > 0. 
+```{r test_element_length}
+# how many have length > 0
+sum(sapply(test_text, function(x){length(x) > 0}))
+```
+Because there is only one element that has a length greater than zero, there are major problems, and, given the time limit today, I will not go into detail about the causes of these issues (though feel free to contact me if you would like to discuss it in further detail). For now, we will move to another solution. 
+
+
+### Tesseract
+
+The `pdf_text()` function has problems with several opinions, such as opinion 69 (on the website, not `all_pdf_links` row 69). We get text, but it is unrecognizable as a natural language. If you would like to see an example, you may run the following code; I do not do so here. 
+```{r pdf_text_prob_ex, eval=FALSE}
+pdf_text("http://www.ccne-ethique.fr/sites/default/files/publications/avis069en.pdf")
+```
+
+Another option, which is generally less preferable than `pdf_text()` for reasons you will see, is the tesseract package.[^1] The workflow is decidedly less direct. With this package, you must first convert a pdf to an image file; the pdftools package's `pdf_convert()` can help with this. You will notice that doing so creates an image in the working directory for each page of the pdf; this is a clear limitation to this approach, as the previous one did not require you to download new files. However, in cases such as the present where there are major errors prohibiting task completion, the tradeoff seems to be justified. When automating this process, we will be sure to delete the image files after OCRing the set for a single CCNE opinion. 
+
+[^1]: [Here](https://cran.r-project.org/web/packages/tesseract/vignettes/intro.html) is a good introduction/vignette.
+
+```{r tesseract_first_attempt}
+# convert to image (pdftools)
+pngfile <- pdftools::pdf_convert('http://www.ccne-ethique.fr/sites/default/files/publications/avis069en.pdf', dpi = 600)
+
+# convert to text
+text <- tesseract::ocr(pngfile)
+#cat(text)
+
+# remove pnd files
+sapply(pngfile, file.remove)
+```
+We again get errors, but, after inspecting the images, nothing seems to be off in any detrimental sense. Further, the text seems to be decent. The `sapply()` function tells us that all of the png files have been deleted from the working directory. 
+
+
+We now can replace the `pdf_text()` function that we used in the `lapply()` to get `opinino_texts` with the tesseract approach, but a new function is needed due to the indirect conversion, ocr, and deletion process we undertook immediately above. 
+```{r get_text_try2}
+# new function
+get_pdf_text <- function(x) {
+  pngfile <- pdftools::pdf_convert(x, dpi = 600)
+
+  # convert to text
+  return(tesseract::ocr(pngfile))
+
+  # remove pnd files
+  invisible(sapply(pngfile, file.remove))
+}
+
+# get texts
+opinion_texts_tes <- lapply(all_pdf_links_nomiss$pdf_link, get_pdf_text) 
+
 ```
 
