@@ -279,24 +279,48 @@ But, before doing that, let's use the `get_pdf_link()` function from earlier to 
 
 PROBLEMS FROM HERE DOWN!
 ```{r get_all_pdf_links}
-all_pdf_links <- lapply(all_pub_pages$full_pub_page_link, get_pdf_link) #%>% 
-  #as_tibble() %>% 
-  #rename(pdf_link = value) %>% 
-  #bind_rows()
+# get pdf links
+all_pdf_links <- lapply(all_pub_pages$full_pub_page_link, get_pdf_link) 
+
+# collapse
+all_pdf_links <- all_pdf_links %>% 
+  unlist() %>% 
+  as_tibble() %>% 
+  rename(pdf_link = value)
 ```
 
 ```{r}
+# save so don't have to access site every time
+saveRDS(all_pdf_links, file = "all_pdf_links.rds")
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# ran when lapply didn't work
 list <- vector(mode = "list", length = nrow(all_pub_pages))
-for i in 1:nrow(all_pub_pages){
-  list[[i]] <- get_pdf_link(all_pub_pages[i,2])
+for (i in 1:20){
+  list[[i]] <- get_pdf_link(all_pub_pages$full_pub_page_link[i])
 }
 ```
 
 
-
+errors
 
 ```{r}
-opinion_texts <- lapply(all_pub_pages$full_pub_page_link, pdf_text) 
+all_pdf_links_nomiss <- all_pdf_links %>% 
+  filter(!is.na(pdf_link))
+
+opinion_texts <- lapply(all_pdf_links_nomiss$pdf_link, pdf_text) 
   
+```
+```{r}
+all_pdf_links_nomiss <- all_pdf_links_nomiss %>% 
+  mutate(row_id = 1:nrow(all_pdf_links_nomiss))
+
+test_text <- vector(mode = "list", length = nrow(all_pdf_links_nomiss))
+for (i in 1:nrow(all_pdf_links_nomiss)){
+  test_text[[1]] <- pdf_text(all_pdf_links_nomiss$pdf_link[i])
+  message(paste0("Row ", all_pdf_links_nomiss$row_id[i], " is fine."))
+}
 ```
 
