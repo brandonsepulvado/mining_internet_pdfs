@@ -95,7 +95,6 @@ The first piece of required input is the pdf link (`pdf_link`), and the second i
 However, I do not want to download the actual files; I just want the text. There are multiple packages that will read text from pdf files, but I will use the pdftools package. By using the `pdf_text` function, we can go directly from the `pdf_link` object to a new object containing the opinion text, bypassing the need to save the pdf file.
 
 ```{r read_opinion_text}
-library(pdftools)
 opinion <- pdf_text(pdf_link)
 ```
 
@@ -460,3 +459,5 @@ opinion_all <- opinion_all %>%
 opinion_all
 ```
 Notice that the variables from the previous iteration where the row unit was the line have been transferred to the respective words. 
+
+Now, what if one uses the tesseract option? There should be no difference in the tidying process because that process saves one .png per page and then returns a character vector in which each element is a page. Lines are again separated by "\n". 
