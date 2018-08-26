@@ -15,6 +15,8 @@ library(dplyr)
 library(glue)
 library(pdftools)
 library(tesseract)
+library(stringr)
+library(tidytext)
 ```
 
 
@@ -307,14 +309,14 @@ for (i in 1:20){
 
 We have now arrived at the big moment: extracting the text from all pdfs. Before going so, it is necessary to remove the two NAs because `pdf_text()` will attempt to treat them as urls.
 
-```{r}
+```{r, error=TRUE}
 all_pdf_links_nomiss <- all_pdf_links %>% 
   filter(!is.na(pdf_link))
 
 opinion_texts <- lapply(all_pdf_links_nomiss$pdf_link, pdf_text) 
   
 ```
-Oh now! We get a ton of errors that do not provide much direction about where exactly the problem is located. 
+Oh no! We get a ton of errors that do not provide much direction about where exactly the problem is located. 
 
 To help solve this problem, I'm going to go with a computationally less efficient though perhaps more straightforward manner of identifying problematic areas/files. First, I create a variable that is simply the case/row id; second, I write a for loop to report that a row is successfully handled, which will at a minimum let us know where the problem originates.
 ```{r}
@@ -361,7 +363,7 @@ We again get errors, but, after inspecting the images, nothing seems to be off i
 
 
 We now can replace the `pdf_text()` function that we used in the `lapply()` to get `opinino_texts` with the tesseract approach, but a new function is needed due to the indirect conversion, ocr, and deletion process we undertook immediately above. 
-```{r get_text_try2}
+```{r get_text_try2, eval=FALSE}
 # new function
 get_pdf_text <- function(x) {
   pngfile <- pdftools::pdf_convert(x, dpi = 600)
@@ -378,3 +380,83 @@ opinion_texts_tes <- lapply(all_pdf_links_nomiss$pdf_link, get_pdf_text)
 
 ```
 
+Unfortunately, we get a bad error message: the R session aborts. This issue turns out to be well *identified*, though poorly *documented* in tesseract (check out the github page), but there is no clear solution. There are likely inconsistencies in new and legacy dictionaries that the `ocr()` function callss. It is possible to dig down into the code and tell tesseract to ignore the legacy dictionary, but that is far beyond the scope of this example. 
+
+
+
+## Tidying the Output(s)
+
+Obviously, this outcome is less than ideal; I would have preferred to show you a workflow that runs without issue. I could have shown you a successful example with the altered tesseract code, but I chose to leave the various errors (e.g., selectorgadet problem, various ocr errors with pdftools and tesseract) because these are ones that you would likely encounter if you undertake a task similar to the one at hand. If you do run into these or similar problems, feel free to come to me; the University also has multiple centers that offer help: the [Center for Social Research](https://csr.nd.edu/), the [Center for Research Computing](crc.nd.edu), and the [Navari Family Center for Digital Scholarship](http://cds.library.nd.edu/). Know that these issues are not insurmountable. 
+
+Before I conclude however, I want to return to getting the output structured in a way easily applicable to sociological analyses. Let's return to the `opinion` object, which contains the text of the 127th opinion.
+
+```{r org_results_1}
+class(opinion)
+length(opinion)
+```
+This code indicates that it is a character vector of length 26. `opinion` is structured such that each element is a page from the pdf, and "\n" indates a line break. To prepare for this example, let's also import opinino 126, which is the second row in  `all_pdf_links`. This document has 75 pages. 
+```{r org_results_2}
+opinion_126 <- pdf_text(as.character(all_pdf_links[2,1]))
+class(opinion_126)
+length(opinion_126)
+```
+
+I ultimately want a data set in which there is one word per row and with variables indicating the document, the page number, and the line. The package upon which we will most heavily rely is [tidytext](https://www.tidytextmining.com/).[^2]
+
+[^2]: Also, check out Julia Silge's [blog](https://juliasilge.com/).
+
+```{r org_results_3}
+# create document variable
+opinion <- opinion %>% 
+  as_tibble() %>% 
+  rename(page_content = value) %>% 
+  mutate(opinion = "127")
+opinion_126 <- opinion_126 %>% 
+  as_tibble() %>% 
+  rename(page_content = value) %>% 
+  mutate(opinion = "126")
+
+# combine opinion documents
+opinion_all <- bind_rows(opinion, opinion_126)
+```
+
+
+Now, let's add the page number variable. The following code takes the data and uses `groupy_by()` to partition the rows into exclusive sets based upon the CCNE opinion in which they are found. There will be two groups in our case because we only have two opinions, but, if for example we had all of them, there would be almost 130 groups. `mutate()` then adds a variable called `page_num` that corresponds to the page number *within each group/opinion*. 
+```{r page_numbers}
+# add page number within each opinion
+opinion_all <- opinion_all %>% 
+  group_by(opinion) %>% 
+  mutate(page_num = row_number())
+
+# check out new variable
+opinion_all
+```
+
+
+Now for the line numbers: Recall that lines are indicated by "\n". Creating a variable for the page number was quite straightforward because the pages corresponded to rows, but now that is not the case. We will use the tidytext package (specifically, the `unnest_tokens()` function) to split the `page_content` cells into multiple rows and then create a new variable `line_num`. Note that, if there were variables for each row when rows corresponded to a page, their contents would be copied to each new row that comes from the respective previous row.
+```{r line_numbers}
+# add page number within each opinion
+opinion_all <- opinion_all %>% 
+  unnest_tokens(line_content, page_content, # line_content is a new variable
+                token = stringr::str_split, pattern = "\n") %>%  
+  group_by(opinion, page_num) %>% 
+  mutate(line_num = row_number())
+
+# check out new variable
+opinion_all
+```
+
+Finally, let's unnest once more in order to get one word per row. 
+
+
+
+Finally, let's unnest this result into an object where rows are single words. 
+```{r final_unnest}
+# unnest to word rows
+opinion_all <- opinion_all %>% 
+  unnest_tokens(word, line_content)
+
+# print result
+opinion_all
+```
+Notice that the variables from the previous iteration where the row unit was the line have been transferred to the respective words. 
