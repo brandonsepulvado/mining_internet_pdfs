@@ -5,9 +5,6 @@ date: "`r format(Sys.Date(), '%d %B %Y')`"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(include = FALSE, eval = FALSE)
-```
 
 ```{r load_packages, message=FALSE, warning=FALSE}
 library(rvest)
@@ -306,9 +303,10 @@ for (i in 1:20){
 
 We have now arrived at the big moment: extracting the text from all pdfs. Before going so, it is necessary to remove the two NAs because `pdf_text()` will attempt to treat them as urls.
 
-```{r, error=TRUE}
+```{r, error=TRUE, warning=FALSE}
 all_pdf_links_nomiss <- all_pdf_links %>% 
-  filter(!is.na(pdf_link))
+  filter(!is.na(pdf_link)) %>% 
+  filter(pdf_link != "http://www.ccne-ethique.fr/docs/en/avis037.pdf") # non-existent
 
 opinion_texts <- lapply(all_pdf_links_nomiss$pdf_link, pdf_text) 
   
