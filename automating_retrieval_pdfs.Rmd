@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(include = FALSE, eval = FALSE)
 ```
 
 ```{r load_packages, message=FALSE, warning=FALSE}
@@ -22,7 +22,7 @@ library(tidytext)
 
 # Problem
 
-I study the emergence of new fields and categorization practices within the biomedical sciences, and bioethics is a key domain where academics and practitioners debate issues affecting patients, policies, and the organziation of societal risks. France has an interesting organization, called the __Comité Consultatif National d'Éthique__ (henceforth, CCNE), that provides ethical guidance for various policies. The [CCNE](http://www.ccne-ethique.fr/en) may help the President of France, the presidents of the National Assembly and Senate, higher education insitutions, various public organziations, and certain foundations. The CCNE was established in 1983 by the government and regularly releases opinions. 
+I study the emergence of new fields and categorization practices within the biomedical sciences, and bioethics is a key domain where academics and practitioners debate issues affecting patients, policies, and the organziation of societal risks. France has an interesting organization, called the *Comité Consultatif National d'Éthique* (henceforth, CCNE), that provides ethical guidance for a range of public and private policies. The [CCNE](http://www.ccne-ethique.fr/en) may help the President of France, the presidents of the National Assembly and Senate, higher education insitutions, various public organziations, and certain foundations. The CCNE was established in 1983 by the government and regularly releases opinions. 
 
 I want to download all of the opinions released to date (127 in English, 128 in French). Given the relatively small number, this task could be accomplished manually, but I want to replicate it for several international organization. Thus, I will use R to automate it. 
 
@@ -34,13 +34,11 @@ There are multiple ways to accomplish these tasks, but I will demonstrate two.
 
 ## Obtain File Links with rvest
 
-The [rvest](https://github.com/hadley/rvest) package is probably the best documented of the potential methods and was created by Hadley Wickham. It basically serves to facilitate work with the `xml2` and `httr` packages, which can be rather complex and difficult to use. There are multiple good tutorials for rvest, such as [this](https://www.datacamp.com/community/tutorials/r-web-scraping-rvest) one from DataCamp and [thus](https://blog.rstudio.com/2014/11/24/rvest-easy-web-scraping-with-r/) from RStudio. 
+The [rvest](https://github.com/hadley/rvest) package is probably the best documented of the potential methods and was created by Hadley Wickham. It basically serves to facilitate work with the `xml2` and `httr` packages, which can be rather complex and difficult to use. There are multiple good tutorials for rvest, such as [this](https://www.datacamp.com/community/tutorials/r-web-scraping-rvest) one from DataCamp and [this](https://blog.rstudio.com/2014/11/24/rvest-easy-web-scraping-with-r/) from RStudio. 
 
 ### CSS SelectorGadget
 
 Before we can extract the links to the opinion files, we need to know where exactly in the underlying code for the webpage is housed the file paths. I will use the CSS selector. Luckily, one does not have to be a CSS/HTML expert (I certainly am not); [selectorgadget](https://selectorgadget.com/) provides a wonderful bookmarklet and Chrome extension (I use the latter).
-
-Insert gif of selection process here. 
 
 The main/first page for the CCNE opinions is this: http://www.ccne-ethique.fr/en/type_publication/avis. When you navigate to this link, you will see a list of the several latest opinions, and several "unofficial" opinions, which are not part of their formal opinion series. The latter will not have a number (in the No. field). You cannot download an opinion on this page; rather, you must click on the title (titre) of an opinion. If you click on the latest opinion, number 127, you will be directed to a page with a summary of the opinion and a button to download the PDF. The summaries are not consistently this long or detailed, so I want to actual files. 
 
@@ -152,7 +150,7 @@ pdf_links_10 <- lapply(pub_page_links, get_pdf_link) %>%
 # print result
 pdf_links_10
 ```
-There are a few things to note here. The function take *a single publication page* and returns its pdf link, and, after writing that, I use `lapply()` to apply this function to each url within `pub_page_link`, after which I collapse the resultant list into a tibble. In many cases, you can use `bind_rows()` from the dplyr package after `lapply()`, but, because `bind_rows()` relies on column names, it does not work in this instance; this issue is why pipe into the `unlist()`-`as_tibble()`-`rename()` chain. 
+There are a few things to note here. The function takes *a single publication page* and returns its pdf link, and, after writing that, I use `lapply()` to apply this function to each url within `pub_page_link`, after which I collapse the resultant list into a tibble. In many cases, you can use `bind_rows()` from the dplyr package after `lapply()`, but, because `bind_rows()` relies on column names, it does not work in this instance; this issue is why pipe into the `unlist()`-`as_tibble()`-`rename()` chain. 
 
 However, there is a big issue: the fourth row does not contain a pdf link. The entry is for a footnote on that page, which can be resolved with effort (that is not easily generalizable to other problems), but I will, for the time being, simply rewrite the function to replace this value with an NA. I use the rule that each url should contain "pdf". 
 
@@ -183,7 +181,7 @@ pdf_links_10
 
 ### All Publication Pages
 
-In the last section, we took a single "main" page of the CCNE website's publication section, where 10 opinions are listed and where we can find the url for each of those opinions' webpage. We obtained a part of each of the 10 urls and then completed. Next, we wrote a function to extract the pdf link contained within each of the publication webpages. The task now is to repeat this process for each "main" publication page. 
+In the last section, we took a single "main" page of the CCNE website's publication section, where 10 opinions are listed and where we can find the url for each of those opinions' webpage. We obtained a part of each of the 10 urls and then completed them. Next, we wrote a function to extract the pdf link contained within each of the publication webpages. The task now is to repeat this process for each "main" publication page. 
 
 ![Figure 2: Getting last page](page_numbers.png)
 
@@ -343,7 +341,7 @@ The `pdf_text()` function has problems with several opinions, such as opinion 69
 pdf_text("http://www.ccne-ethique.fr/sites/default/files/publications/avis069en.pdf")
 ```
 
-Another option, which is generally less preferable than `pdf_text()` for reasons you will see, is the tesseract package.[^1] The workflow is decidedly less direct. With this package, you must first convert a pdf to an image file; the pdftools package's `pdf_convert()` can help with this. You will notice that doing so creates an image in the working directory for each page of the pdf; this is a clear limitation to this approach, as the previous one did not require you to download new files. However, in cases such as the present where there are major errors prohibiting task completion, the tradeoff seems to be justified. When automating this process, we will be sure to delete the image files after OCRing the set for a single CCNE opinion. 
+Another option, which is generally less preferable than `pdf_text()` for reasons you will see, is the tesseract package.[^1] The workflow is decidedly less direct. With this package, you must first convert a pdf to an image file; the pdftools package's `pdf_convert()` can help with this. You will notice that doing so creates an image in the working directory for each page of the pdf; this is a clear limitation to this approach, as the previous one did not require you to download new files. However, in cases such as the present where there are major errors prohibiting task completion, the trade off seems to be justified. When automating this process, we will be sure to delete the image files after OCRing the set for a single CCNE opinion. 
 
 [^1]: [Here](https://cran.r-project.org/web/packages/tesseract/vignettes/intro.html) is a good introduction/vignette.
 
@@ -379,7 +377,7 @@ opinion_texts_tes <- lapply(all_pdf_links_nomiss$pdf_link, get_pdf_text)
 
 ```
 
-Unfortunately, we get a bad error message: the R session aborts. This issue turns out to be well *identified*, though poorly *documented* in tesseract (check out the github page), but there is no clear solution. There are likely inconsistencies in new and legacy dictionaries that the `ocr()` function callss. It is possible to dig down into the code and tell tesseract to ignore the legacy dictionary, but that is far beyond the scope of this example. 
+Unfortunately, we get a bad error message: the R session aborts. This issue turns out to be well *identified*, though poorly *documented* in tesseract (check out the github page), but there is no clear solution. There are likely inconsistencies in new and legacy dictionaries that the `ocr()` function calls. It is possible to dig down into the code and tell tesseract to ignore the legacy dictionary, but that is far beyond the scope of this example. 
 
 
 
@@ -393,7 +391,7 @@ Before I conclude however, I want to return to getting the output structured in 
 class(opinion)
 length(opinion)
 ```
-This code indicates that it is a character vector of length 26. `opinion` is structured such that each element is a page from the pdf, and "\n" indates a line break. To prepare for this example, let's also import opinino 126, which is the second row in  `all_pdf_links`. This document has 75 pages. 
+This code indicates that it is a character vector of length 26. `opinion` is structured such that each element is a page from the pdf, and "\n" indicates a line break. To prepare for this example, let's also import opinion 126, which is the second row in  `all_pdf_links`. This document has 75 pages. 
 ```{r org_results_2}
 opinion_126 <- pdf_text(as.character(all_pdf_links[2,1]))
 class(opinion_126)
